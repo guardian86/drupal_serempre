@@ -1,0 +1,191 @@
+<?php
+
+function myusers_init(){
+    drupal_add_css(drupal_get_path('module','myusers') . '/css/myusers_style.css' );
+    drupal_add_js(drupal_get_path('module','myusers') . '/js/myusers_function.js' );
+}
+
+function myusers_permission(){
+    return array(
+        'administrador mi modulo' => array(
+            'title' => t('Permisos CRUD'),
+            'description' => t('Permisos para el CRUD'),
+        ),
+    );
+}
+
+//crear bloque para traer la consulta 
+function myusers_block_alter(&$data, $block){
+    
+}
+
+function myusers_block_view(){
+
+}
+
+function myusers_menu(){
+    $items = array();
+    $items['myusers'] = array(
+        'title'             => t('Registro de Usuarios'),
+        'page callback'     => 'drupal_get_form',
+        'page arguments'    => array('funcion_crud'), //funcion que se regresa
+        'access arguments'  => array('Permisos CRUD'),
+        'accesss callback'  => true,
+        'type'              => MENU_CALLBACK, 
+    );
+
+    $items[lista] = array(
+        'title'             => t('lista'),
+        'page callback'     => 'lista_resultados',
+        'access arguments'  => array('Permisos CRUD'),
+        'type'              => MENU_CALLBACK, 
+    );
+
+    $items['eliminar/%'] = array(
+        'title'             => t('Eliminar Registro'),
+        'page callback'     => 'eliminar_registro',
+        'page arguments'    => array(1),//segundo parametro a pasar
+        'access arguments'  => array('Permisos CRUD'),
+        'type'              => MENU_CALLBACK, 
+    );
+
+    $items['editar/%'] = array(
+        'title'             => t('Editar Registro'),
+        'page callback'     => 'editar_registros',
+        'page arguments'    => array(1),//segundo parametro a pasar
+        'access arguments'  => array('Permisos CRUD'),
+        'type'              => MENU_CALLBACK, 
+    );
+
+    return $items;
+}
+
+//creacion del formulario
+function funcion_crud($form, &$form_state){
+    $form = array();
+    $form['nombre'] = array(
+        '#title'        => t('Nombre del usuario'),
+        '#type'         => 'textfield',
+        '#description'  => t(''),
+        '#required'     => true,
+        '#default_value'=> '',
+        '#size'         => 50,
+    );
+
+    $form['submit'] = array(
+        '#type'     =>  'submit',
+        '#value'    =>  'Guardar',    
+    );
+
+    return $form;
+}
+
+
+function validateForm(array &$form, FormStateInterface $form_state) {
+
+    $name = $form_state->getValue('nombre');
+    if(strlen($form_state->getValue('nombre')) >= 5){
+      if(preg_match('/[^A-Za-z]/', $name)) {
+         $form_state->setErrorByName('nombre', $this->t('su nombre debe tener solo carácteres de la A-Z'));
+     }
+    }else{
+     $form_state->setErrorByName('nombre', $this->t('su nombre debe ser mínimo 5 carácteres'));
+    }
+
+}
+
+//guardar el registro en la db
+function funcion_crud_submit(&$form, &$form_state){
+    $consulta = db_insert('myusers')
+                ->fields(array('nombre' => $form_state['values']['nombre'] ))
+                ->execute();
+                drupal_set_message('Registro Guardado Correctamente');
+                drupal_goto('lista');
+}
+
+function lista_resultados(){
+    $salida = "";
+    $salida .= l('Agregar nuevo registro', 'crud');
+
+    $header = array(t('ID'), t('NOMBRE'), t('EDITAR'), t('ELIMINAR'));
+    $query = db_select('myusers', 'c');
+    $query -> fields('c ', array('id', 'nombre'))
+                ->range(0,8) //numero de resultados
+                ->orderBy('c.id');
+    $r = $query->execute();
+
+    $rows = array();
+    foreach($r as $res){
+        $rows[] = array(
+            check_plain($res->id),
+            check_plain($res->nombre),
+            l('Editar', 'editar/' . $res->id),
+            l('Eliminar', 'eliminar/' . $res->id),
+        );
+    }
+
+    //creacion de la tabla
+    $salida = theme('table', array('header' => $header, 'rows' => $rows ));
+    return($salida);
+}
+
+function eliminar_registro($id){
+    db_delete('myusers')
+    ->condition('id', $id)
+    ->execute();
+    drupal_set_message('Registro eliminado correctamente');
+    drupal_goto('lista');
+}
+
+
+function editar_registros($id){
+    $salida = "";
+    $salida .= l('Regresar al listado', 'lista');
+    return $salida .= drupal_render(drupal_get_form('editar_formulario'));
+    //return $salida .= drupal_render(drupal_get_form('editar_formulario'));
+}
+
+function editar_formulario($form, &$form_state){
+    $query = db_select("myusers", "b")
+            ->fields("b")
+            ->condition("id", arg(1), '=');
+     $query = $query->execute()->fetchAssoc();
+
+     $form = array();
+     $form['nombre'] = array(
+        '#title'        => t('Nombre del usuario'),
+        '#type'         => 'textfield',
+        '#description'  => t(''),
+        '#required'     => true,
+        '#value'        => $query['nombre'],
+        '#size'         => 50,
+     );
+
+     $form['submit'] = array(
+        '#type'     =>  'submit',
+        '#value'    =>  'Guardar',    
+    );
+
+     return $form;
+}
+
+function editar_formulario_submit($form, &$form_state){
+    db_update('myusers')
+    ->fields(array('nombre' =>$form_state['input']['nombre'] ))
+    ->condition("id", arg(1), '=')
+    ->execute();
+    drupal_set_message('Registro actualizado correctamente');
+    drupal_goto('lista');
+}
+
+function registro_formulario_submit($form, &$form_state){
+    db_update('myusers')
+    ->fields(array('nombre' =>$form_state['input']['nombre'] ))
+    ->condition("id", arg(1), '=')
+    ->execute();
+    drupal_set_message('Registro creado correctamente');
+    drupal_goto('lista');
+}
+
+
+

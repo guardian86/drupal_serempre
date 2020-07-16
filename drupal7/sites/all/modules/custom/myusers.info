@@ -1,0 +1,6 @@
+name = Crud Usuarios
+description = Formulario Crud para el manejo de Usuarios
+core = 7.x
+package = Custom
+type = module
+

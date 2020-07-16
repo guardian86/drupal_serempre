@@ -1,0 +1,30 @@
+<?php
+
+/**
+ * hook schema para la base de datos
+ */
+
+function crud_prueba_schema(){
+    $schema['myusers'] = array(
+        'description' => 'Tabla de la base de datos myusers',
+        'fields' => array(
+            'id' => array(
+                'description' => 'Id',
+                'type' => 'serial',
+                'not null' => true,
+            ),
+            'nombre' => array(
+                'description' => 'Nombre',
+                'type'=> 'varchar',
+                'length' => 30,
+                'not null' => true
+            )
+
+        ),
+        'primary key' => array('id'),
+    );
+    return $schema;
+ }
+
+
+
