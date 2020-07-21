@@ -1,0 +1,477 @@
+<?php
+
+/**
+ * @file
+ * Module file to Give Facility to Import CSV Data into System.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function import_csv_data_menu() {
+  $items = array();
+
+  $items['admin/importdata'] = array(
+    'title' => 'Import Data',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array(
+      'import_csv_data_form',
+    ),
+    'access arguments' => array('administer site configuration'),
+	  'type' => MENU_NORMAL_ITEM,
+    'description' => 'Imports Data into the System',
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_form().
+*/
+function import_csv_data_form($form, &$form_state) {
+
+  $table_list = '';
+  $row_type = '';
+
+  $form['error-message'] = array(
+    '#prefix' => '<div id="maintenance-error-message">',
+    '#suffix' => '</div>',
+  );
+
+  $result = db_query("SHOW TABLES LIKE 'csv_import_%'");
+  while ($record = $result->fetchAssoc()) {
+    $record = array_values($record);
+    $table_describe = db_query("DESCRIBE $record[0]")->fetchAll();
+    $table_description = "<div class='import-table-description-wrap'>
+                            <table class='import-table-description'>
+                              <thead><tr><th>Field</th><th>Type</th><th>Null ?</th></tr></thead>
+                              <tbody>";
+    $table_describe = array_slice($table_describe, 1, -1);
+    foreach ($table_describe as $table_describe_record) {
+      $row_type = ($row_type==='even')?'odd':'even';
+      $table_description.= "<tr class='$row_type'>
+                              <td>$table_describe_record->Field</td>
+                              <td>$table_describe_record->Type</td>
+                              <td>$table_describe_record->Null</td>
+                            </tr>";
+    }
+    $table_description.= "</tbody></table></div>";
+    $table_list.= "<div class='imported-table-details-wrap'><a href='#' class='imported-table-name'>$record[0]</a>$table_description</div>";
+  }
+
+  $table_list = (empty($table_list))?'None so far !':$table_list;
+  $form['csv_import_table_list'] = array(
+    '#type' => 'item',
+    '#title' => t('List of Tables already Imported with System : '),
+    '#markup' => $table_list,
+    '#weight' => 0,
+  );
+
+  $str_desc = t('Please give name to be used for table to create import and store records.') . 
+              '<br/>' . 
+              t('First Row from uploaded file will be used for Columns to create table for the import.') . 
+              '<br/>' . 
+              t('If table already exists, and column fields matches then new rows will be appended from uploaded file.');
+  $form['table_name'] = array(
+    '#type' => 'textfield',
+    '#title' => 'Table Name :',
+    '#description' => $str_desc,
+    '#maxlength' => 30,
+    '#required' => TRUE,
+    '#weight' => 1,
+    '#field_suffix' => '',
+  );
+
+  $str_desc = t('Upload a file, allowed extensions: csv.') . 
+              '<br/>' . 
+              t('Column names in uploaded file will be used as field names in imported table.');
+
+  $form['file'] = array(
+    '#type' => 'file',
+    '#name' => 'files[]',
+    '#title' => t('Upload CSV File(s)'),
+    '#description' => $str_desc,
+    '#attributes' => array('multiple' => 'multiple'),
+    '#weight' => 2,
+  );
+  $btn_value = t('Schedule For Import');
+ 
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => $btn_value,
+    '#submit' => array(
+      'import_csv_data_form_submit',
+    ),
+    '#weight' => 3,
+  );
+  return $form;
+}
+
+/**
+ * Implements hook_form_validate().
+*/
+function import_csv_data_form_validate($form, &$form_state) {
+  $table_name = import_csv_data_generate_tablename($form_state['values']['table_name']);
+  if (isset($_FILES['files']['name'])) {
+    $num_files = count($_FILES['files']['name']);
+    for ($i = 0; $i < $num_files; $i++) {
+      $file = file_save_upload($i, array(
+        // Validate extensions.
+        'file_validate_extensions' => array('csv'),
+      ));
+      // If the file passed validation:
+      if ($file) {
+        // Move the file into the Drupal file system
+        $hash = 'public://imports';
+        if (file_prepare_directory($hash, FILE_CREATE_DIRECTORY)) {
+          file_prepare_directory($hash, FILE_MODIFY_PERMISSIONS);
+          if ($file = file_move($file, $hash . '/' . $table_name . '.csv', FILE_EXISTS_RENAME)) {
+            // Save the file for use in the submit handler.
+            $form_state['values']['file'] = TRUE;
+            $form_state['storage']['file'][$i] = $file;
+            $file->status = FILE_STATUS_PERMANENT;
+            $file = file_save($file);
+          } else {
+            form_set_error('file', t('Failed to write the uploaded file the site\'s file folder.'));
+          }
+        } else {
+          form_set_error('file', t('Failed to create \'imports\' folder to upload file.'));
+        }
+      } else {
+        form_set_error('file', t('No file was uploaded.'));
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_submit().
+*/
+function import_csv_data_form_submit($form, &$form_state) {
+  $vars = array();
+  $table_name = import_csv_data_generate_tablename($form_state['values']['table_name']);
+  if (isset($form_state['values']['file'])) {
+    foreach ($form_state['storage']['file'] as $key => $file) {
+      if (($handle = fopen($file->uri, "r")) !== FALSE) {
+        $columns = fgetcsv($handle, 1000, ","); // We just need the first row for fields.
+        if($columns[0] !== NULL) {
+          $import_tables[$table_name] = $columns;
+          fclose($handle);
+        } else {
+          form_set_error('file', t('Failed to fetch table field information from first row of file : %f', array('%f' => str_replace('temporary://', '', $file->destination))));
+        }
+      }
+      $file_list[] = str_replace('temporary://', '', $file->destination);
+    }
+  }
+
+  if (isset($import_tables) && !empty($import_tables)) {
+    foreach ($import_tables as $table_name => $table_columns) {
+      import_csv_data_generate_table($table_name, $table_columns);
+    }
+    drupal_set_message(t('File(s) %f  Scheduled for CRON to import data into %t.', array('%f' => implode(", ", $file_list), '%t' => $table_name)));
+    watchdog('Import Data', 'File(s) Scheduled for CRON to import data.', $vars, WATCHDOG_INFO, NULL);
+  } else {
+    // Revert the file upload, if failed to create table.
+    foreach ($form_state['storage']['file'] as $key => $file) {
+      file_delete($file);
+    }
+    form_set_error('form', t('Failed to Import !'));
+  }
+}
+
+/**
+ * Implements hook_cronapi().
+*/
+function import_csv_data_cronapi($op, $job = NULL) {
+  return array(
+    'import_data_cronjob' => array(
+      'title' => 'Import Data Handler',
+      'callback' => 'import_csv_data_import_callback',
+      'enabled' => TRUE,
+      'scheduler' => array(
+        'name' => 'crontab',
+        'crontab' => array(
+          'rules' => array('0+@ */12 * * *'),
+        ),
+      ),
+    ),
+  );
+}
+
+/* Cron Job */
+function import_csv_data_import_callback($job) {
+  $vars = array();
+  $hash = 'public://imports';
+  $files = file_scan_directory($hash, '/.*\.csv$/', array('recurse' => FALSE));
+  $hash .= '/completed';
+
+  if (file_prepare_directory($hash, FILE_CREATE_DIRECTORY)) {
+    file_prepare_directory($hash, FILE_MODIFY_PERMISSIONS);
+    watchdog('Cron Import Data', t('Folder \'completed\' Prepared to move file.'), $vars, WATCHDOG_INFO,NULL);
+  } else {
+    form_set_error('file', t('Failed to create \'completed\' folder to move file.'));
+    watchdog('Cron Import Data', t('Failed to create \'completed\' folder to move file.'), $vars, WATCHDOG_ERROR,NULL);
+  }
+
+  foreach ($files as $file_name => $file_details) {
+    if (file_exists($file_name)) {
+      if (($handle = fopen($file_name, "r")) !== FALSE) {
+        $columns = fgetcsv($handle, 1000, ","); // We just need the first row for fields.
+        if($columns[0] !== NULL) {
+          array_walk($columns, 'import_csv_data_clean_up_field');
+          $table_columns = $columns;
+          $columns = implode(',', $columns);
+          fclose($handle);
+        } else {
+          form_set_error('file', t('Failed to fetch table field information from first row of file : %f', array('%f' => str_replace('temporary://', '', $file->destination))));
+        }
+      }
+
+      import_csv_data_generate_table($file_details->name, $table_columns);
+      if (isset($columns) && is_string($columns)) {
+        $query = "LOAD DATA INFILE '" . drupal_realpath('public://') . "/imports/" . $file_details->filename . "'
+                  INTO TABLE $file_details->name 
+                  FIELDS TERMINATED BY ',' 
+                  IGNORE 1 LINES ($columns) 
+                  SET created = " . time() . " ;";
+        @db_query($query);
+        watchdog('Cron Import Data', t('Data Imported into database table %t from file %f.', array('%t' => $file_details->name, '%f'=> $file_details->filename)), $vars, WATCHDOG_INFO,NULL);
+
+        // Now that, we are done with import, lets move the file into designated location.
+        $files = file_load_multiple(array(), array('uri' => $file_details->uri));
+        $file = reset($files); // If empty, $file will be false, otherwise will contain the required file in discussion.
+        $file = file_move($file, $hash, FILE_EXISTS_RENAME);
+        watchdog('Import Data', t('Moved the uploaded file %f to \'completed\' folder.', array('%f'=> $file_details->filename)), $vars, WATCHDOG_INFO, NULL);
+      }
+    } else {
+      watchdog('Cron Import Data', t('File %f not found to import the data.', array('%f'=> $file_details->filename)), $vars, WATCHDOG_ERROR,NULL);
+   }
+  }
+}
+
+/**
+ * Implements hook_block_info().
+*/
+function import_csv_data_block_info() {
+  $blocks['aggregate_report'] = array(
+    'info' => t('Aggregate Report Block'),
+    'cache' => DRUPAL_NO_CACHE,
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+*/
+function import_csv_data_block_view($delta = '') {
+  $block = array();
+
+  switch ($delta) {
+    case 'aggregate_report':
+      $block['subject'] = t('Aggregate Report Block');
+      $block['title'] = t('Aggregate Report Block');
+      $block['region'] = 'content';
+      $block['visibility'] = 1;
+      $block['pages'] = 'aggregate-report';
+      $block['content'] = array(
+        '#markup' =>import_csv_data_aggregate_report_content(),
+      );
+    break;
+  }
+  return $block;
+}
+
+/**
+ * Function to clean up field to create/display.
+*/
+function import_csv_data_clean_up_field(&$field, $key = null) {
+  $pattern = '/[\s]+/';
+  $replacement = '_';
+  $field = preg_replace($pattern, $replacement, $field);
+  return $field;
+}
+
+/**
+ * Function to generate table name to import.
+*/
+function import_csv_data_generate_tablename($name) {
+  $pattern = '/[^A-Za-z0-9\s]/';
+  $replacement = '';
+  $name = preg_replace($pattern, $replacement, $name);
+  $pattern = '/[\s]+/';
+  $replacement = '_';
+  $table_name = "csv_import_" . preg_replace($pattern, $replacement, $name);
+  return $table_name;
+}
+
+/**
+ * Function to generate table to import.
+*/
+function import_csv_data_generate_table($table_name, $table_columns) {
+  $vars = array();
+  $query = "CREATE TABLE IF NOT EXISTS {$table_name} 
+            ( `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Primary Key: Auto Increment Unique ID.', ";
+  foreach ($table_columns as $key => $column) {
+    if (isset($column) && !empty($column)) {
+      $column = import_csv_data_clean_up_field($column);
+      $query.= "`$column` VARCHAR(255), ";
+    }
+  }
+  $query.= "`created` int(11) NOT NULL DEFAULT '0' COMMENT 'Timestamp for record was created.', 
+              PRIMARY KEY(`id`)) 
+              ENGINE=INNODB 
+              DEFAULT CHARSET=utf8 
+              COMMENT='Stores Imported Data.'";
+  @db_query($query);
+  watchdog('Import Data', "TABLE `$table_name` created.", $vars, WATCHDOG_INFO, NULL);
+  return true;
+}
+
+/**
+ * For Block Content.
+*/
+function import_csv_data_aggregate_report_content() {
+  $str_output = '';
+  $temp_form = drupal_get_form('import_csv_data_aggregate_data_form');
+  $str_output.= drupal_render($temp_form);
+
+  if (isset($_GET['table-name']) && !empty($_GET['table-name'])) {
+    $table_name = $_GET['table-name'];
+    $start_time = isset($_GET['start-date'])?$_GET['start-date']:'';
+    $end_time = isset($_GET['end-date'])?$_GET['end-date']:'';
+
+    $result = db_query("SHOW COLUMNS FROM `$table_name`")->fetchAll(); 
+    foreach ($result as $record) {
+      $field_names[] = $record->Field;
+      $header[] = array('data' =>  ucwords($record->Field), 'field' => $record->Field, 'sort' => 'ASC');
+    }
+    $field_names = array_slice($field_names, 1, -1);
+    $header = array_slice($header, 1, -1);
+    $header[] = array('data' =>  'Created', 'field' => 'created', 'sort' => 'ASC'); // Add one last item for display.
+
+    $aggregate_report_query = db_select($table_name, $table_name)
+                                ->extend('PagerDefault')
+                                ->extend('TableSort');
+    $aggregate_report_query->fields($table_name, $field_names);
+    $aggregate_report_query->addExpression("DATE_FORMAT(FROM_UNIXTIME(created), '%D %M %Y %h:%i %p')"); // Get 5th item for display.
+
+    if (!empty($start_time) && !empty($end_time)) {
+      $aggregate_report_query->condition('created', array($start_time, $end_time), 'BETWEEN');
+    }
+
+    $aggregate_report_query->orderByHeader($header)->limit(10); // LIMIT to 10 records for pager;
+
+    $aggregate_report_result = $aggregate_report_query->execute();
+
+    if ($aggregate_report_result->rowCount()!=0) {
+      while ($aggregate_report_record = $aggregate_report_result->fetchAssoc()) {
+        $rows[] = $aggregate_report_record;
+      }
+    } else {
+      $rows[] = array('data' => array(array('data' => t('No Records Found !'), 'colspan' => count($header))),'class' => array('no-aggregate-records'));
+    }
+
+    $str_output.= theme('table', array('header' => $header,'rows' => $rows ));
+    $str_output.= theme('pager', array('element' => 1)); // add the pager.
+  }
+
+  return $str_output;
+}
+
+/**
+ * Form to Filter.
+ *
+ * Implements hook_form().
+*/
+function import_csv_data_aggregate_data_form() {
+  $form['error-message'] = array(
+    '#prefix' => '<div id="maintenance-error-message">',
+    '#suffix' => '</div>',
+  );
+  
+  $table_name = empty($_GET['table-name'])?"":$_GET['table-name'];
+  $start_time = empty($_GET['start-date'])?mktime(0, 0, 0, date("m"), date("d"), date("Y")) - (604800):$_GET['start-date'];
+  $end_time = empty($_GET['end-date'])?mktime(23, 59, 59, date("m"), date("d"), date("Y")):$_GET['end-date'];
+
+  $result = db_query("SHOW TABLES LIKE 'csv_import_%'");
+  $table_list[""] = "- Select -";
+  while ($record = $result->fetchAssoc()) {
+    $record = array_values($record);
+    $table_list[$record[0]] = $record[0];
+  }
+
+  $form['table-name'] = array(
+    '#type' => 'select',
+    '#title' => t('Select Table'),
+    '#options' => $table_list,
+    '#description' => t('Select table to generate a report from.'),
+    '#required' => TRUE,
+    '#default_value' => $table_name,
+  );
+
+  $form['start-date'] = array(
+    '#type' => 'date_popup',
+    '#title' => t('Start Date'),
+    '#date_label_position' => 'within',
+    '#default_value' => date('Y-m-d', $start_time),
+    '#date_type' => DATE_UNIX,
+    '#date_timezone' => date_default_timezone(),
+    '#date_format' => 'm-d-Y',
+    '#date_increment' => 1,
+    '#date_year_range' => '-3:+3',
+    '#attributes' => array('placeholder' => t('Start date'),'class' => array('aggregate-report-start-date')),
+  );
+
+  $form['end-date'] = array(
+    '#type' => 'date_popup',
+    '#title' => t('End Date'),
+    '#date_label_position' => 'within',
+    '#default_value' => date('Y-m-d',$end_time),
+    '#date_type' => DATE_UNIX,
+    '#date_timezone' => date_default_timezone(),
+    '#date_format' => 'm-d-Y',
+    '#date_increment' => 1,
+    '#date_year_range' => '-3:+3',
+    '#attributes' => array('placeholder' => t('End date')),
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Filter'),
+    '#submit' => array(
+      'import_csv_data_aggregate_data_form_submit',
+    ),
+  );
+  $form['#attributes']['class'][] = 'aggregate-data-filter-form';
+  $form['#validate'][] = 'import_csv_data_aggregate_data_form_validate';
+  return $form;
+}
+
+/**
+ * Implements hook_validate().
+*/
+function import_csv_data_aggregate_data_form_validate($form, &$form_state) {
+  if ((isset($form_state['values']['start-date']) && !isset($form_state['values']['end-date'])) || (!isset($form_state['values']['start-date']) && isset($form_state['values']['end-date']))) {
+    form_set_error('Import', t('Please provide both, start date and end date OR None.'));
+    return FALSE;
+  }
+}
+
+/**
+ * Implements hook_form_submit().
+*/
+function import_csv_data_aggregate_data_form_submit($form, &$form_state) {
+  $start_date = '';
+  $end_date = '';
+  $table_name = $form_state['values']['table-name'];
+  if (isset($form_state['values']['start-date'])) {
+    $arr_start_date = explode('-', $form_state['values']['start-date']);
+    $start_date = mktime(0, 0, 0, $arr_start_date[1], $arr_start_date[2], $arr_start_date[0]);
+  }
+
+  if (isset($form_state['values']['end-date'])) {
+    $arr_end_date = explode('-', $form_state['values']['end-date']);
+    $end_date = mktime(23, 59, 59, $arr_end_date[1], $arr_end_date[2], $arr_end_date[0]);
+  }
+  drupal_goto(current_path(), array('query' => array('table-name'=>$table_name, 'start-date'=>$start_date,'end-date'=>$end_date)));
+}

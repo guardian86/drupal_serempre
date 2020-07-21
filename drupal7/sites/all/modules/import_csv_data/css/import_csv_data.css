@@ -1,0 +1,58 @@
+/**
+ * @file
+ * CSS file for import data.
+ */
+
+.block-import-csv-data,
+.block-import-csv-data .content,
+.block-import-csv-data .content .aggregate-data-filter-form {
+    display: inline-block 
+}
+
+.aggregate-data-filter-form .container-inline-date,
+.aggregate-data-filter-form .form-item-created-date {
+  float: left;
+  clear: right;
+}
+
+.aggregate-data-filter-form .created-date-prefix {
+  margin-top: 27px;
+  margin-right: 10px;
+  float: left;
+  clear: right;
+}
+
+.aggregate-data-filter-form .form-submit {
+  float: left;
+  clear: both;
+  margin-top: 20px;
+}
+
+.imported-table-details-wrap {
+  display: block;
+}
+
+.imported-table-name:hover,
+.imported-table-name {
+  display: inline-block;
+  text-decoration: none;
+}
+
+.imported-table-name:hover,
+.import-table-description-wrap:hover + .imported-table-name {
+  color: red;
+}
+
+.import-table-description-wrap {
+  width: 50%;
+  left: 40px;
+  position: absolute;
+  height: 255px;
+  overflow: scroll;
+  display: none;
+}
+
+.import-table-description-wrap:hover,
+.imported-table-name:hover + .import-table-description-wrap {
+    display: block;
+}

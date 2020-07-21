@@ -8,19 +8,32 @@ function myusers_init(){
 function myusers_permission(){
     return array(
         'administrador mi modulo' => array(
-            'title' => t('Permisos CRUD'),
+            'title' => t('access content'),
             'description' => t('Permisos para el CRUD'),
         ),
     );
 }
 
 //crear bloque para traer la consulta 
-function myusers_block_alter(&$data, $block){
-    
+function myusers_block_info(){
+    $blocks['myusers_block_listado'] = array(
+        'info' => 'Consulta listado de usuarios'
+    );
+    return $blocks;
 }
 
-function myusers_block_view(){
-
+function myusers_block_view($delta = ''){
+    $block = array();
+    switch ($delta) {
+        case 'myusers_block_listado':
+            $block['subject'] = t('Listado Usuarios');
+            lista_resultados();
+            break;
+        
+        default:
+            # code...
+            break;
+    }
 }
 
 function myusers_menu(){
@@ -29,15 +42,15 @@ function myusers_menu(){
         'title'             => t('Registro de Usuarios'),
         'page callback'     => 'drupal_get_form',
         'page arguments'    => array('funcion_crud'), //funcion que se regresa
-        'access arguments'  => array('Permisos CRUD'),
+        'access arguments'  => array('access content'),
         'accesss callback'  => true,
         'type'              => MENU_CALLBACK, 
     );
 
     $items[lista] = array(
-        'title'             => t('lista'),
+        'title'             => t('Listado Usuarios'),
         'page callback'     => 'lista_resultados',
-        'access arguments'  => array('Permisos CRUD'),
+        'access arguments'  => array('access content'),
         'type'              => MENU_CALLBACK, 
     );
 
@@ -45,7 +58,7 @@ function myusers_menu(){
         'title'             => t('Eliminar Registro'),
         'page callback'     => 'eliminar_registro',
         'page arguments'    => array(1),//segundo parametro a pasar
-        'access arguments'  => array('Permisos CRUD'),
+        'access arguments'  => array('access content'),
         'type'              => MENU_CALLBACK, 
     );
 
@@ -53,7 +66,7 @@ function myusers_menu(){
         'title'             => t('Editar Registro'),
         'page callback'     => 'editar_registros',
         'page arguments'    => array(1),//segundo parametro a pasar
-        'access arguments'  => array('Permisos CRUD'),
+        'access arguments'  => array('access content'),
         'type'              => MENU_CALLBACK, 
     );
 
@@ -141,7 +154,8 @@ function eliminar_registro($id){
 function editar_registros($id){
     $salida = "";
     $salida .= l('Regresar al listado', 'lista');
-    return $salida .= drupal_render(drupal_get_form('editar_formulario'));
+    $editar_formulario = drupal_get_form('editar_formulario');
+    return $salida .= drupal_render($editar_formulario);
     //return $salida .= drupal_render(drupal_get_form('editar_formulario'));
 }
 

@@ -1,0 +1,31 @@
+<?php
+
+/**
+ * @file
+ * Install file for Import Data entries management.
+ */
+
+/**
+ * Implements hook_disable().
+ */
+function import_csv_data_disable() {
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function import_csv_data_uninstall() {
+  // Rename table created in module with todays date for backup.
+  try {
+      $result = db_query("SHOW TABLES LIKE 'csv_import_%'");
+      while ($record = $result->fetchAssoc()) {
+        $record = array_values($record);
+        $new_name = "uninstalled_" . str_replace('csv_import_', '', $record[0]) . "_" . date("YmdHij");
+        $query = "RENAME TABLE `$record[0]` TO `$new_name`";
+        db_query($query);
+      }
+  } catch (Exception $e) {
+    // Ignore possible errors when the user doesn't have the necessary
+    // privileges to RENAME the database.
+  }
+}
